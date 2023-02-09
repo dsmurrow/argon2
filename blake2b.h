@@ -4,7 +4,7 @@
 #include <inttypes.h>
 #include <stddef.h>
 
-uint8_t *blake2b(uint8_t*, size_t, uint16_t);
+uint8_t *blake2b(uint8_t*, size_t, uint8_t);
 
 #endif
 

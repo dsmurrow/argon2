@@ -140,17 +140,13 @@ static uint8_t *BLAKE2B(uint64_t (*d)[16], size_t dd, uint64_t ll[2], uint8_t nn
 	return digest;
 }
 
-uint8_t *blake2b(uint8_t *message, size_t len, uint16_t identifier)
+uint8_t *blake2b(uint8_t *message, size_t len, uint8_t nn)
 {
 	uint64_t (*blocks)[16], ll[2];
 	size_t i;
 	size_t dd = len > 0 ? (len / bb) + (len % bb != 0) : 1;
 
 	if(message == NULL) return NULL;
-	if(identifier != 160 
-	&& identifier != 256
-	&& identifier != 384
-	&& identifier != 512) return NULL;
 
 	blocks = calloc(dd, sizeof(uint64_t[16]));
 
@@ -160,14 +156,12 @@ uint8_t *blake2b(uint8_t *message, size_t len, uint16_t identifier)
 		big_boy <<= 8 * (i % 8);
 
 		blocks[i / bb][(i % bb) / 8] |= big_boy;
-
-		message[i] = 0; /* Gets message out of memory, right? */
 	}
 
 	ll[0] = len & UINT64_MAX;
 	if(sizeof(size_t) > 8) ll[1] = len >> 64;
 	else ll[1] = 0;
 
-	return BLAKE2B(blocks, dd, ll, identifier / 8);
+	return BLAKE2B(blocks, dd, ll, nn);
 }
 
