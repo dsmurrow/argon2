@@ -5,6 +5,8 @@
 
 #ifdef __GNUC__
 #pragma GCC diagnostic ignored "-Wshift-count-overflow"
+#elif _MSC_VER
+/* TODO */
 #endif
 
 #define bb 128
