@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#if defined(__linux__) || defined(__apple__)
+#ifdef __GNUC__
 #pragma GCC diagnostic ignored "-Wshift-count-overflow"
 #endif
 
