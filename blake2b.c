@@ -94,14 +94,11 @@ static void F(uint64_t h[8], uint64_t m[16], uint64_t t[2], int f)
 }
 
 /* Function is keyless */
-static uint8_t *BLAKE2B(uint64_t (*d)[16], size_t dd, uint64_t ll[2], uint8_t nn)
+static int BLAKE2B(uint8_t *dest, uint64_t (*d)[16], size_t dd, uint64_t ll[2], uint8_t nn)
 {
-	uint8_t *digest = malloc(nn * sizeof(uint8_t));
 	uint8_t bytes[8];
 	uint64_t i, j;
 	uint64_t t[2] = {0, 0}, h[8];
-
-	if(digest == NULL) return NULL;
 
 	/* h[0..7] = IV[0..7] */
 	for(i = 0; i < 8; i++)
@@ -136,13 +133,13 @@ static uint8_t *BLAKE2B(uint64_t (*d)[16], size_t dd, uint64_t ll[2], uint8_t nn
 			}
 		}
 
-		digest[i] = bytes[i % 8];
+		dest[i] = bytes[i % 8];
 	}
 
-	return digest;
+	return 0;
 }
 
-uint8_t *blake2b(uint8_t *message, size_t len, uint8_t nn)
+uint8_t *blake2b(uint8_t *dest, uint8_t *message, size_t len, uint8_t nn)
 {
 	uint64_t (*blocks)[16], ll[2];
 	size_t i;
@@ -151,6 +148,14 @@ uint8_t *blake2b(uint8_t *message, size_t len, uint8_t nn)
 	if(message == NULL) return NULL;
 
 	blocks = calloc(dd, sizeof(uint64_t[16]));
+	if(blocks == NULL) return NULL;
+
+	if(dest == NULL)
+	{
+		dest = malloc(nn * sizeof(uint8_t));
+		if(dest == NULL) return NULL;
+	}
+
 
 	for(i = 0; i < len; i++)
 	{
@@ -164,6 +169,9 @@ uint8_t *blake2b(uint8_t *message, size_t len, uint8_t nn)
 	if(sizeof(size_t) > 8) ll[1] = len >> 64;
 	else ll[1] = 0;
 
-	return BLAKE2B(blocks, dd, ll, nn);
+
+	BLAKE2B(dest, blocks, dd, ll, nn);
+
+	return dest;
 }
 
