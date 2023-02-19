@@ -38,6 +38,7 @@ struct threading_args
 	struct a2thread_context *threads;
 	struct argon2_context *ctx;
 	uint32_t l_start, l_end;
+	size_t thread_num;
 };
 
 static void clear_block(block_t block)
@@ -284,6 +285,7 @@ static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generaliz
 				if(j % (ctx->q / SL) == 0) /* if at first block in new segment */
 				{
 					pass_ctx.s++; /* TODO: remember to wait for other segments to catch up */
+					a2thread_wait_or_broadcast(args->threads, args->thread_num);
 					if(ctx->y == 1) compute_new_values_flag = 1;
 				}
 				else if(ctx->y == 1 && j == 2) /* if this is first value of j and we're still in the first segment */
@@ -323,6 +325,7 @@ static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generaliz
 				if(j % (ctx->q / SL) == 0)
 				{
 					pass_ctx.s++; /* TODO: wait */
+					a2thread_wait_or_broadcast(args->threads, args->thread_num);
 					if(ctx->y == 1) compute_new_values_flag = 1;
 				}
 				else if(ctx->y == 1 && j == 1) compute_new_values_flag = 1;
@@ -548,8 +551,6 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		concat_int(H_0, &pass_start, 1);
 		concat_int(H_0, &pass_start, (uint32_t) i);
 		H_prime(ctx.blocks[i][1], H_0, H0_len, 1024);
-
-		// TODO: make multithreaded calls to pass()
 	}
 
 	free(H_0);
@@ -578,9 +579,12 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		thargs[i].l_end = i + 1;
 		thargs[i].ctx = &ctx;
 		thargs[i].threads = thread_context;
+		thargs[i].thread_num = i;
 
 		a2thread_assign(thread_context, i, &pass, (a2thread_args_t) &thargs[i]);
 	}
+
+	a2thread_join(thread_context);
 
 	free(thargs);
 	a2thread_destroy(thread_context);
