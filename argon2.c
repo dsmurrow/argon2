@@ -1,9 +1,28 @@
+#include "argon2.h"
+
 #include "blake2b.h"
 #include "threading.h"
 
 #include <stdlib.h>
 
 #define SL 4
+
+#ifdef DEBUG
+#include <assert.h>
+#include <stdio.h>
+
+#define FAILED_ALLOC(name, item) printf(name " failed memory alloc for " item "\n")
+
+static void print_bytes(const uint8_t *bytes, size_t len, const char *prefix, const char *suffix)
+{
+	size_t i;
+	printf("%s", prefix);
+	for(i = 0; i < len; i++)
+		printf("%02X ", bytes[i]);
+	printf("%s", suffix);
+}
+
+#endif
 
 #define CEIL(dividend, divisor) (((dividend) / (divisor)) + ((dividend) % (divisor) != 0))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -72,8 +91,8 @@ static void P(argon_register_t *S[8])
 
 	for(int i = 0; i < 8; i++)
 	{
-		v[2 * i] = S[i][1];
-		v[(2 * i) + 1] = S[i][0];
+		v[2 * i] = &(*S[i])[1]; /* THIS IS NASTY */
+		v[(2 * i) + 1] = &(*S[i])[0];
 	}
 
 	blake_G(v[0], v[4], v[8], v[12]);
@@ -94,6 +113,10 @@ static void G(block_t dest, block_t X, block_t Y)
 		block_t block;
 		argon_register_t reg[64];
 	};
+
+#ifdef DEBUG
+	assert(sizeof(block_t) == sizeof(argon_register_t[64]));
+#endif
 
 	uint_fast16_t i, j;
 	union data Z;
@@ -131,7 +154,7 @@ static void concat_long(uint8_t *buffer, uint64_t *i, uint64_t n)
 	uint_fast8_t j;
 
 	for(j = 0; j < sizeof(uint64_t); j++)
-		buffer[*(i++)] = p[j];
+		buffer[(*i)++] = p[j];
 }
 
 static void G2(block_t dest,
@@ -151,6 +174,10 @@ static void G2(block_t dest,
 	concat_long(&Z[0], &index, y);
 	concat_long(&Z[0], &index, i);
 
+#ifdef DEBUG
+	assert(index == sizeof(uint64_t) * 7);
+#endif
+
 	G(dest, blank, Z);
 	G(dest, blank, dest);
 }
@@ -168,6 +195,13 @@ static void compute_a2i_values(struct argon2_pass_context *ctx)
 	}
 }
 
+static uint32_t next_a2i_value(struct argon2_pass_context *ctx)
+{
+	uint8_t *val = &ctx->inst->values[ctx->inst->cursor / 1024][ctx->inst->cursor % 1024];
+	ctx->inst->cursor += sizeof(uint32_t);
+	return *(uint32_t*) val;
+}
+
 static block_t *get_reference_block(struct argon2_pass_context *ctx, uint32_t j)
 {
 	uint32_t l;
@@ -179,27 +213,30 @@ static block_t *get_reference_block(struct argon2_pass_context *ctx, uint32_t j)
 	block_t *ret = NULL;
 	block_t **R = malloc(ctx->ctx->q * sizeof(block_t*));
 
-	if(R == NULL) return NULL;
+	if(R == NULL)
+	{
+#ifdef DEBUG
+		FAILED_ALLOC("get_reference_block", "R");
+#endif
+		return NULL;
+	}
 
 	if(ctx->ctx->y == 0)
 	{
-		J_1 = *(uint32_t*) &ctx->ctx->blocks[ctx->inst->l][j - 1][0];
-		J_2 = *(uint32_t*) &ctx->ctx->blocks[ctx->inst->l][j - 1][sizeof(uint32_t)];
+		J_1 = *(uint32_t*) &ctx->ctx->blocks[ctx->inst->l][(j + ctx->ctx->q - 1) % ctx->ctx->q][0];
+		J_2 = *(uint32_t*) &ctx->ctx->blocks[ctx->inst->l][(j + ctx->ctx->q - 1) % ctx->ctx->q][sizeof(uint32_t)];
 	}
 	else if(ctx->ctx->y == 1)
 	{
-		J_1 = *(uint32_t*) &ctx->inst->values[ctx->inst->cursor];
-		ctx->inst->cursor += sizeof(uint32_t);
-
-		J_2 = *(uint32_t*) &ctx->inst->values[ctx->inst->cursor];
-		ctx->inst->cursor += sizeof(uint32_t);
+		J_1 = next_a2i_value(ctx);
+		J_2 = next_a2i_value(ctx);
 	}
 	else return NULL;
 
 	/* mapping J_1 and J_2 */
 	l = J_2 % ctx->ctx->p;
 
-	if(l == ctx->inst->l || (ctx->r == 0 && ctx->s == 0))
+	if((ctx->r == 1 && ctx->s == 0))
 	{
 		for(uint32_t i = 0; i < j - 1; i++)
 		{
@@ -222,12 +259,20 @@ static block_t *get_reference_block(struct argon2_pass_context *ctx, uint32_t j)
 			i = (i + 1) % ctx->ctx->q;
 		}
 
-		if(j == start_of_this_segment) Rlen--;
+		if(l == ctx->inst->l ^ j == start_of_this_segment) Rlen--;
 	}
+#ifdef DEBUG
+	assert(Rlen > 0);
+	assert(Rlen < ctx->ctx->q);
+#endif	
 
 	x = (J_1 * J_1) / two_32;
 	y = (Rlen * x) / two_32;
 	z = Rlen - 1 - y;
+
+#ifdef DEBUG
+	assert(z < Rlen);
+#endif
 
 	ret = R[z];
 
@@ -235,7 +280,7 @@ static block_t *get_reference_block(struct argon2_pass_context *ctx, uint32_t j)
 	return ret;
 }
 
-static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generalize return value */
+static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generalize return value and cancel threads when error happens*/
 {
 	int compute_new_values_flag;
 	uint32_t j, l, l_start, l_end;
@@ -252,7 +297,13 @@ static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generaliz
 	l_end = args->l_end;
 
 	instances = calloc(l_end - l_start, sizeof(struct argon2_pass_instance));
-	if(instances == NULL) return NULL;
+	if(instances == NULL)
+	{
+#ifdef DEBUG
+		FAILED_ALLOC("pass", "instances");
+#endif
+		return NULL;
+	}
 
 
 	for(l = 0; l < (l_end - l_start); l++)
@@ -262,15 +313,21 @@ static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generaliz
 			instances[l].values = malloc(CEIL(ctx->q, 128 * SL) * sizeof(block_t));
 			if(instances[l].values == NULL)
 			{
+#ifdef DEBUG
+				FAILED_ALLOC("pass", "instance values");
+#endif
 				for(j = 0; j < l; j++)
 					free(instances[j].values);
 				free(instances);
 
 				return NULL;
 			}
+#ifdef DEBUG
+			assert(l_end - l_start == 1); /* until I generalize parallelism */
+#endif
 		}
 
-		instances[l].l = l;
+		instances[l].l = l + l_start;
 	}
 
 	for(pass_ctx.r = 1; pass_ctx.r <= ctx->t; pass_ctx.r++)
@@ -284,7 +341,7 @@ static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generaliz
 
 				if(j % (ctx->q / SL) == 0) /* if at first block in new segment */
 				{
-					pass_ctx.s++; /* TODO: remember to wait for other segments to catch up */
+					pass_ctx.s++;
 					a2thread_wait_or_broadcast(args->threads, args->thread_num);
 					if(ctx->y == 1) compute_new_values_flag = 1;
 				}
@@ -299,7 +356,7 @@ static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generaliz
 						compute_a2i_values(&pass_ctx);
 
 					reference = get_reference_block(&pass_ctx, j);
-					G(ctx->blocks[l][j], ctx->blocks[l][j], *reference);
+					G(ctx->blocks[l][j], ctx->blocks[l][j - 1], *reference);
 				}
 			}
 		}
@@ -324,7 +381,7 @@ static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generaliz
 
 				if(j % (ctx->q / SL) == 0)
 				{
-					pass_ctx.s++; /* TODO: wait */
+					pass_ctx.s++;
 					a2thread_wait_or_broadcast(args->threads, args->thread_num);
 					if(ctx->y == 1) compute_new_values_flag = 1;
 				}
@@ -346,9 +403,13 @@ static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generaliz
 		}
 	}
 
+#ifdef DEBUG
+	assert(pass_ctx.s == SL - 1);
+#endif
+
 	if(ctx->y == 1)
 	{
-		for(l = l_start; l < l_end; l++)
+		for(l = 0; l < (l_end - l_start); l++)
 			free(instances[l].values);
 		free(instances);
 	}
@@ -362,7 +423,7 @@ static void concat_int(uint8_t *buffer, uint64_t *i, uint32_t n)
 	uint_fast8_t j;
 
 	for(j = 0; j < sizeof(uint32_t); j++)
-		buffer[*(i++)] = p[j]; 
+		buffer[(*i)++] = p[j]; 
 }
 
 static uint8_t *H_prime(block_t dest, const uint8_t *message, uint32_t ml, uint32_t output_len)
@@ -447,7 +508,7 @@ static uint8_t *H_prime(block_t dest, const uint8_t *message, uint32_t ml, uint3
 	return digest;
 }
 
-static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
+uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		const uint8_t *S, uint32_t sl,
 		uint32_t p, uint32_t T, uint32_t m, uint32_t t,
 		uint32_t v, uint32_t y)
@@ -487,10 +548,13 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 
 	pass_start = i;
 	concat_int(buffer, &i, pl);
+
 	for(j = 0; j < pl; i++, j++)
 	{
 		buffer[i] = P[j];
+#ifndef DEBUG
 		P[j] = 0; /* clear password from memory */
+#endif
 	}
 	pass_end = i;
 
@@ -498,11 +562,9 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 	for(j = 0; j < sl; i++, j++)
 		buffer[i] = S[j];
 
-	if(i != buffer_length)
-	{
-		free(buffer);
-		return NULL;
-	}
+#ifdef DEBUG
+	assert(i == buffer_length);
+#endif
 
 	H0_len = (64 * sizeof(uint8_t)) + (2 * sizeof(uint32_t));
 	H_0 = malloc(H0_len);
@@ -512,7 +574,7 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		return NULL;
 	}
 	H_0 = blake2b(H_0, buffer, buffer_length, 64);
-	
+
 	for(i = pass_start; i < pass_end; i++)
 		buffer[i] = 0; /* clear password from buffer in case it doesn't get cleared after being freed */
 	free(buffer);
@@ -538,7 +600,6 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 			return NULL;
 		}
 	}
-
 
 	for(i = 0; i < p; i++)
 	{
@@ -590,10 +651,10 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 	a2thread_destroy(thread_context);
 
 	C = &ctx.blocks[0][ctx.q - 1];
-	for(i = 0; i < p; i++)
+	for(i = 1; i < p; i++)
 		xor_blocks(*C, ctx.blocks[i][ctx.q - 1]);
 
-	buffer = H_prime(NULL, (uint8_t*) &(*C[0]), 1024, T);
+	buffer = H_prime(NULL, (uint8_t*) &((*C)[0]), 1024, T);
 
 	for(i = 0; i < p; i++)
 		free(ctx.blocks[i]);
