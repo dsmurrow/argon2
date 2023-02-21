@@ -66,7 +66,7 @@ static void clear_block(block_t block)
 		block[i] = 0;
 }
 
-static void xor_blocks(block_t a, block_t b)
+static void xor_blocks(block_t a, const block_t b)
 {
 	uint_fast16_t i;
 	for(i = 0; i < 1024; i++)
@@ -91,8 +91,8 @@ static void P(argon_register_t *S[8])
 
 	for(int i = 0; i < 8; i++)
 	{
-		v[2 * i] = &(*S[i])[1]; /* THIS IS NASTY */
-		v[(2 * i) + 1] = &(*S[i])[0];
+		v[2 * i] = &((*S[i])[1]); /* THIS IS NASTY */
+		v[(2 * i) + 1] = &((*S[i])[0]);
 	}
 
 	blake_G(v[0], v[4], v[8], v[12]);
@@ -106,7 +106,7 @@ static void P(argon_register_t *S[8])
 	blake_G(v[3], v[4], v[9], v[14]);
 }
 /* this is fucking gross */
-static void G(block_t dest, block_t X, block_t Y)
+static void G(block_t dest, const block_t X, const block_t Y)
 {
 	union data
 	{
@@ -202,24 +202,15 @@ static uint32_t next_a2i_value(struct argon2_pass_context *ctx)
 	return *(uint32_t*) val;
 }
 
-static block_t *get_reference_block(struct argon2_pass_context *ctx, uint32_t j)
+static const block_t *get_reference_block(struct argon2_pass_context *ctx, uint32_t j)
 {
 	uint32_t l;
 	uint64_t J_1, J_2, x, y, z;
-	uint64_t Rlen = 0;
+	uint64_t R_start, R_end, Rlen;
 
 	const uint64_t two_32 = (UINT64_C(1) << 32);
 
 	block_t *ret = NULL;
-	block_t **R = malloc(ctx->ctx->q * sizeof(block_t*));
-
-	if(R == NULL)
-	{
-#ifdef DEBUG
-		FAILED_ALLOC("get_reference_block", "R");
-#endif
-		return NULL;
-	}
 
 	if(ctx->ctx->y == 0)
 	{
@@ -234,49 +225,40 @@ static block_t *get_reference_block(struct argon2_pass_context *ctx, uint32_t j)
 	else return NULL;
 
 	/* mapping J_1 and J_2 */
-	l = J_2 % ctx->ctx->p;
+	l = ctx->r == 1 && ctx->s == 0 ? ctx->inst->l : J_2 % ctx->ctx->p;
 
-	if((ctx->r == 1 && ctx->s == 0))
+
+	R_start = ctx->r == 1 ? 0 : (ctx->ctx->q / SL) * ((ctx->s + 1) % SL);
+
+#ifdef DEBUG
+	assert(R_start % (ctx->ctx->q / SL) == 0);
+#endif
+	
+	if(l == ctx->inst->l)
 	{
-		for(uint32_t i = 0; i < j - 1; i++)
-		{
-			R[i] = &ctx->ctx->blocks[ctx->inst->l][i];
-			Rlen++;
-		}
+		R_end = (j + ctx->ctx->q - 1) % ctx->ctx->q;
 	}
 	else
 	{
-		size_t i, r_index;
-		size_t start_of_this_segment = (ctx->ctx->q / SL) * ctx->s;
-		size_t start_of_next_segment = (ctx->ctx->q / SL) * ((ctx->s + 1) % SL);
-		size_t end = start_of_next_segment == 0 ? start_of_this_segment : ctx->ctx->q;
-
-		for(r_index = 0, i = start_of_next_segment; i != start_of_this_segment; r_index++)
-		{
-			R[r_index] = &ctx->ctx->blocks[l][i];
-			Rlen++;
-
-			i = (i + 1) % ctx->ctx->q;
-		}
-
-		if(l == ctx->inst->l ^ j == start_of_this_segment) Rlen--;
+		R_end = (ctx->ctx->q / SL) * ctx->s;
+		if(j % (ctx->ctx->q / SL) == 0) R_end = (R_end + ctx->ctx->q - 1) % ctx->ctx->q;
 	}
-#ifdef DEBUG
-	assert(Rlen > 0);
-	assert(Rlen < ctx->ctx->q);
-#endif	
+
+	Rlen = (R_end + ctx->ctx->q - R_start) % ctx->ctx->q;
 
 	x = (J_1 * J_1) / two_32;
 	y = (Rlen * x) / two_32;
 	z = Rlen - 1 - y;
 
+	z += R_start;
 #ifdef DEBUG
-	assert(z < Rlen);
+	assert(Rlen < ctx->ctx->q);
+	assert(z >= R_start && z < (R_end + ctx->ctx->q));
 #endif
+	z %= ctx->ctx->q;
 
-	ret = R[z];
+	ret = &ctx->ctx->blocks[l][z];
 
-	free(R);
 	return ret;
 }
 
@@ -284,7 +266,7 @@ static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generaliz
 {
 	int compute_new_values_flag;
 	uint32_t j, l, l_start, l_end;
-	block_t *reference;
+	const block_t *reference;
 	struct threading_args *args = (struct threading_args*) thargs;
 	struct argon2_context *ctx = args->ctx;
 	struct argon2_pass_instance *instances = NULL;
@@ -365,6 +347,8 @@ static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generaliz
 			block_t temp;
 
 			pass_ctx.s = 0;
+
+			a2thread_wait_or_broadcast(args->threads, args->thread_num); /* EVIL!!!! */
 
 			for(l = l_start; l < l_end; l++)
 			{
@@ -508,7 +492,7 @@ static uint8_t *H_prime(block_t dest, const uint8_t *message, uint32_t ml, uint3
 	return digest;
 }
 
-uint8_t *ARGON2(uint8_t *P, uint32_t pl,
+static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		const uint8_t *S, uint32_t sl,
 		uint32_t p, uint32_t T, uint32_t m, uint32_t t,
 		uint32_t v, uint32_t y)
@@ -590,7 +574,11 @@ uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 
 	for(i = 0; i < p; i++)
 	{
+#ifdef DEBUG
+		ctx.blocks[i] = calloc(ctx.q, sizeof(block_t));
+#else
 		ctx.blocks[i] = malloc(ctx.q * sizeof(block_t));
+#endif
 		if(ctx.blocks[i] == NULL)
 		{
 			for(j = 0; j < i; j++)
@@ -614,6 +602,8 @@ uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		H_prime(ctx.blocks[i][1], H_0, H0_len, 1024);
 	}
 
+
+
 	free(H_0);
 
 	thargs = malloc(p * sizeof(struct threading_args));
@@ -622,6 +612,7 @@ uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		for(i = 0; i < p; i++)
 			free(ctx.blocks[i]);
 		free(ctx.blocks);
+		return NULL;
 	}
 
 	thread_context = a2thread_init(p);
@@ -632,6 +623,8 @@ uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		for(i = 0; i < p; i++)
 			free(ctx.blocks[i]);
 		free(ctx.blocks);
+
+		return NULL;
 	}
 
 	for(i = 0; i < p; i++)
@@ -661,5 +654,21 @@ uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 	free(ctx.blocks);
 
 	return buffer;
+}
+
+uint8_t *argon2d(uint8_t *password, uint32_t pass_len,
+		const uint8_t *salt, uint32_t salt_len,
+		uint32_t parallelism, uint32_t tag_length,
+		uint32_t mem_size, uint32_t iterations)
+{
+	return ARGON2(password, pass_len, salt, salt_len, parallelism, tag_length, mem_size, iterations, 0x13, 0);
+}
+
+uint8_t *argon2i(uint8_t *password, uint32_t pass_len,
+		const uint8_t *salt, uint32_t salt_len,
+		uint32_t parallelism, uint32_t tag_length,
+		uint32_t mem_size, uint32_t iterations)
+{
+	return ARGON2(password, pass_len, salt, salt_len, parallelism, tag_length, mem_size, iterations, 0x13, 1);
 }
 
