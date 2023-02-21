@@ -105,7 +105,15 @@ static void P(argon_register_t *S[8])
 	blake_G(v[2], v[7], v[8], v[13]);
 	blake_G(v[3], v[4], v[9], v[14]);
 }
-/* this is fucking gross */
+
+/*
+ * Implementation of the G compression function. Uses some memory trickery with unions to get the 
+ * 16-byte registers without copying data.
+ *
+ * @param dest	Where the output of the function will go. Can be X or Y with no problems.
+ * @param X	First argument
+ * @param Y	Second argument
+ */
 static void G(block_t dest, const block_t X, const block_t Y)
 {
 	union data
@@ -182,6 +190,12 @@ static void G2(block_t dest,
 	G(dest, blank, dest);
 }
 
+/*
+ * Compute the values needed for Argon2i indexing to the extent that I understood the specs.
+ * Values calculated here are stored in ctx->inst->values.
+ *
+ * @param ctx	Struct containing all relevant data
+ */
 static void compute_a2i_values(struct argon2_pass_context *ctx)
 {
 	uint64_t i;
@@ -195,6 +209,14 @@ static void compute_a2i_values(struct argon2_pass_context *ctx)
 	}
 }
 
+/*
+ * Grab the next value from what was calculated in compute_a2i_values.
+ * Has side effect of incrementing ctx->inst->cursor.
+ *
+ * @param ctx	Struct containing all relevant data
+ *
+ * @returns next uint32 in the values as a little-endian int
+ */
 static uint32_t next_a2i_value(struct argon2_pass_context *ctx)
 {
 	uint8_t *val = &ctx->inst->values[ctx->inst->cursor / 1024][ctx->inst->cursor % 1024];
@@ -202,6 +224,14 @@ static uint32_t next_a2i_value(struct argon2_pass_context *ctx)
 	return *(uint32_t*) val;
 }
 
+/*
+ * Calculates B[i'][j'] for a given block B[ctx->inst->l][j].
+ *
+ * @param ctx	Contains lane index for the block we are calculating for, along with other important values
+ * @param j	Column our block resides in
+ *
+ * @returns pointer to B[i'][j']
+ */
 static const block_t *get_reference_block(struct argon2_pass_context *ctx, uint32_t j)
 {
 	uint32_t l;
@@ -227,6 +257,8 @@ static const block_t *get_reference_block(struct argon2_pass_context *ctx, uint3
 	/* mapping J_1 and J_2 */
 	l = ctx->r == 1 && ctx->s == 0 ? ctx->inst->l : J_2 % ctx->ctx->p;
 
+	/* Instead of having R be a literal list of blocks, I just store the range of column indeces it would contain,
+	 * since it will always have blocks of the same lane and have contiguous column indeces modulo q. */
 
 	R_start = ctx->r == 1 ? 0 : (ctx->ctx->q / SL) * ((ctx->s + 1) % SL);
 
@@ -246,6 +278,7 @@ static const block_t *get_reference_block(struct argon2_pass_context *ctx, uint3
 
 	Rlen = (R_end + ctx->ctx->q - R_start) % ctx->ctx->q;
 
+	/* Integer approximation of non-uniform distribution as described in specs */
 	x = (J_1 * J_1) / two_32;
 	y = (Rlen * x) / two_32;
 	z = Rlen - 1 - y;
@@ -262,7 +295,8 @@ static const block_t *get_reference_block(struct argon2_pass_context *ctx, uint3
 	return ret;
 }
 
-static A2THREAD_FUNCTION_PREMISE pass(a2thread_args_t thargs) /* TODO: generalize return value and cancel threads when error happens*/
+
+static A2THREAD_FUNCTION_PREMISE passes(a2thread_args_t thargs) /* TODO: generalize return value and cancel threads when error happens*/
 {
 	int compute_new_values_flag;
 	uint32_t j, l, l_start, l_end;
@@ -410,6 +444,15 @@ static void concat_int(uint8_t *buffer, uint64_t *i, uint32_t n)
 		buffer[(*i)++] = p[j]; 
 }
 
+/* Variable-length hash function H'
+ *
+ * @param dest		block_t to put calculated hash into. If NULL the function will return heap-allocated buffer
+ * @param message	The message to be hashed
+ * @param ml		Length of message
+ * @param output_len	Desired output length of the digest
+ *
+ * @returns If dest is NULL, a heap-allocated buffer of size output_len. Else a pointer to first element in dest
+ */
 static uint8_t *H_prime(block_t dest, const uint8_t *message, uint32_t ml, uint32_t output_len)
 {
 	uint8_t *message_prime = NULL;
@@ -492,6 +535,22 @@ static uint8_t *H_prime(block_t dest, const uint8_t *message, uint32_t ml, uint3
 	return digest;
 }
 
+/*
+ * General implementation of the argon2 Key Derivation Function.
+ *
+ * @param P	User-supplied password. Provided buffer is cleared early into the function
+ * @param pl	Length of P
+ * @param S	Salt value. Not cleared
+ * @param sl	Length of S
+ * @param p	parallelism. Number of threads spawned
+ * @param T	TagLength. Length of output in bytes
+ * @param m	Desired amount of memory to be used. Actual amount of memory used is rounded down to the nearest multiple of 4p
+ * @param t	Number of rounds
+ * @param v	Version number (should always be 0x13)
+ * @param y	Argon2 variant to use. 0 == Argon2d, 1 == Argon2i. Other variants not supported at the moment
+ *
+ * @returns	NULL if there was a failure in the function. Else heap-allocated buffer T bytes long
+ * */
 static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		const uint8_t *S, uint32_t sl,
 		uint32_t p, uint32_t T, uint32_t m, uint32_t t,
@@ -589,6 +648,7 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		}
 	}
 
+	/* Calculate B[i][0] and B[i][1] */
 	for(i = 0; i < p; i++)
 	{
 		pass_start = 64; /*pass_start is now just a placeholder */
@@ -635,7 +695,7 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		thargs[i].threads = thread_context;
 		thargs[i].thread_num = i;
 
-		a2thread_assign(thread_context, i, &pass, (a2thread_args_t) &thargs[i]);
+		a2thread_assign(thread_context, i, &passes, (a2thread_args_t) &thargs[i]);
 	}
 
 	a2thread_join(thread_context);
@@ -643,6 +703,7 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 	free(thargs);
 	a2thread_destroy(thread_context);
 
+	/* XOR the last column together */
 	C = &ctx.blocks[0][ctx.q - 1];
 	for(i = 1; i < p; i++)
 		xor_blocks(*C, ctx.blocks[i][ctx.q - 1]);

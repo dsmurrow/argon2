@@ -139,6 +139,15 @@ static int BLAKE2B(uint8_t *dest, uint64_t (*d)[16], size_t dd, uint64_t ll[2], 
 	return 0;
 }
 
+/* blake2b hash function
+ *
+ * @param dest		Pointer to where output will go. If NULL, returns heap-allocated buffer
+ * @param message	The message to be hashed
+ * @param len		Length of message
+ * @param nn		Length of output digest
+ *
+ * @returns If dest is NULL, a heap-allocated buffer nn bytes in size. Else a pointer to the first element in dest
+ */
 uint8_t *blake2b(uint8_t *dest, uint8_t *message, size_t len, uint8_t nn)
 {
 	uint64_t (*blocks)[16], ll[2];
