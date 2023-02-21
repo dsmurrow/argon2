@@ -1,3 +1,17 @@
+/*
+ * Argon2 implementation
+ *
+ * Copyright 2023
+ * Daniel Murrow
+ *
+ * You may use this work under the terms of LGPL Version 3.
+ *
+ * https://www.gnu.org/licenses/lgpl-3.0.txt
+ *
+ * You should have received a copy of this license along
+ * with this software. If not, you can find it at the above URL.
+ */
+
 #include "blake2b.h"
 
 #include <stdio.h>
