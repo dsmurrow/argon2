@@ -233,6 +233,10 @@ static void compute_a2i_values(struct argon2_pass_context *ctx)
  */
 static uint32_t next_a2i_value(struct argon2_pass_context *ctx)
 {
+#ifdef DEBUG
+	assert((ctx->inst->cursor + sizeof(uint32_t)) < CEIL(ctx->ctx->q, 128 * SL) * 1024);
+#endif
+
 	uint8_t *val = &ctx->inst->values[ctx->inst->cursor / 1024][ctx->inst->cursor % 1024];
 	ctx->inst->cursor += sizeof(uint32_t);
 	return *(uint32_t*) val;
@@ -332,7 +336,7 @@ static A2THREAD_FUNCTION_PREMISE passes(a2thread_args_t thargs) /* TODO: general
 #ifdef DEBUG
 		FAILED_ALLOC("pass", "instances");
 #endif
-		return NULL;
+		return A2THREAD_RETURN;
 	}
 
 
@@ -350,7 +354,7 @@ static A2THREAD_FUNCTION_PREMISE passes(a2thread_args_t thargs) /* TODO: general
 					free(instances[j].values);
 				free(instances);
 
-				return NULL;
+				return A2THREAD_RETURN;
 			}
 #ifdef DEBUG
 			assert(l_end - l_start == 1); /* until I generalize parallelism */
@@ -397,6 +401,7 @@ static A2THREAD_FUNCTION_PREMISE passes(a2thread_args_t thargs) /* TODO: general
 			pass_ctx.s = 0;
 
 			a2thread_wait_or_broadcast(args->threads, args->thread_num); /* EVIL!!!! */
+			compute_a2i_values(&pass_ctx);
 
 			for(l = l_start; l < l_end; l++)
 			{
@@ -417,8 +422,6 @@ static A2THREAD_FUNCTION_PREMISE passes(a2thread_args_t thargs) /* TODO: general
 					a2thread_wait_or_broadcast(args->threads, args->thread_num);
 					if(ctx->y == 1) compute_new_values_flag = 1;
 				}
-				else if(ctx->y == 1 && j == 1) compute_new_values_flag = 1;
-
 
 				for(l = l_start; l < l_end; l++)
 				{
@@ -446,7 +449,7 @@ static A2THREAD_FUNCTION_PREMISE passes(a2thread_args_t thargs) /* TODO: general
 		free(instances);
 	}
 
-	return NULL;
+	return A2THREAD_RETURN;
 }
 
 static void concat_int(uint8_t *buffer, uint64_t *i, uint32_t n)

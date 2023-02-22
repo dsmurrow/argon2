@@ -20,7 +20,7 @@
 #ifdef __GNUC__
 #pragma GCC diagnostic ignored "-Wshift-count-overflow"
 #elif _MSC_VER
-/* TODO */
+#pragma warning(disable : 4293)
 #endif
 
 #define bb 128

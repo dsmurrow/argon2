@@ -47,9 +47,13 @@ typedef pthread_cond_t			a2thread_cond_t;
 
 typedef DWORD				a2size;
 
-typedef HANDLE				a2thread_t
-typedef CRITICAL_SECTION 		a2thread_mutex_t;
-typedef CONDITION_VARIABLE		a2thread_cond_t;
+#define a2thread_t 			HANDLE
+#define a2thread_mutex_t		CRITICAL_SECTION
+#define a2thread_cond_t			CONDITION_VARIABLE
+
+/*typedef (HANDLE)				a2thread_t
+typedef (CRITICAL_SECTION) 		a2thread_mutex_t;
+typedef (CONDITION_VARIABLE)		a2thread_cond_t;*/
 
 #define A2THREAD_MUTEX_INIT(v)		InitializeCriticalSection(&v)
 #define A2THREAD_MUTEX_DESTROY(v)	DeleteCriticalSection(&v)
@@ -57,8 +61,8 @@ typedef CONDITION_VARIABLE		a2thread_cond_t;
 #define A2THREAD_MUTEX_UNLOCK(v)	LeaveCriticalSection(&v)
 
 #define A2THREAD_COND_INIT(v)		InitializeConditionVariable(&v)
-#define A2THREAD_COND_DESTROY(v)	DeleteConditionVariable(&v)
-#define A2THREAD_COND_WAIT(cond, mutex)	!SleepConditionVariable(&cond, &mutex, INFINITE)
+#define A2THREAD_COND_DESTROY(v)	
+#define A2THREAD_COND_WAIT(cond, mutex)	!SleepConditionVariableCS(&cond, &mutex, INFINITE)
 #define A2THREAD_COND_WAKE(cond)	WakeConditionVariable(&cond)
 #endif
 
@@ -104,6 +108,8 @@ int a2thread_destroy(struct a2thread_context *ctx)
 	A2THREAD_COND_DESTROY(ctx->cond);
 
 	free(ctx);
+
+	return 0;
 }
 
 int a2thread_wait_or_broadcast(struct a2thread_context *ctx, size_t i)
@@ -133,6 +139,8 @@ int a2thread_wait_or_broadcast(struct a2thread_context *ctx, size_t i)
 		}
 		A2THREAD_MUTEX_UNLOCK(ctx->cond_mutex);
 	}
+
+	return 0;
 }
 
 int a2thread_assign(struct a2thread_context *ctx, size_t i, a2thread_function_t f, a2thread_args_t args)
@@ -145,7 +153,7 @@ int a2thread_assign(struct a2thread_context *ctx, size_t i, a2thread_function_t 
 
 #ifdef A2PTHREAD
 	return pthread_create(&ctx->threads[i], NULL, f, args);
-#elif A2WINDOWS
+#elif defined(A2WINDOWS)
 	ctx->threads[i] = CreateThread(NULL, 0, f, args, 0, NULL);
 #endif
 
@@ -161,7 +169,7 @@ int a2thread_join(struct a2thread_context *ctx)
 #ifdef A2PTHREAD
 	for(a2size i = 0; i < ctx->n_threads; i++)
 		pthread_join(ctx->threads[i], NULL);
-#elif A2WINDOWS
+#elif defined(A2WINDOWS)
 	WaitForMultipleObjects(ctx->n_threads, ctx->threads, TRUE, INFINITE);
 
 	for(a2size i = 0; i < ctx->n_threads; i++)

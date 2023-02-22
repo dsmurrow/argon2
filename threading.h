@@ -22,19 +22,25 @@
 typedef void*				a2thread_args_t;
 typedef void*				a2thread_ret_t;
 
+#define A2THREAD_RETURN			NULL
 #define A2THREAD_FUNCTION_PREMISE	void*
 #elif defined(_MSC_VER)
 #include <windows.h>
 
 typedef LPVOID				a2thread_args_t;
-typedef DWORD				a2thread_ret_t;
 
+#define A2THREAD_RETURN			0
 #define A2THREAD_FUNCTION_PREMISE	DWORD WINAPI
 #endif
 
 struct a2thread_context;
 
+#ifndef _MSC_VER
 typedef a2thread_ret_t (*a2thread_function_t)(a2thread_args_t);
+#else
+typedef LPTHREAD_START_ROUTINE 		a2thread_function_t;
+#endif
+
 
 struct a2thread_context *a2thread_init(size_t);
 int a2thread_destroy(struct a2thread_context*);
