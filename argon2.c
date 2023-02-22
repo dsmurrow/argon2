@@ -137,6 +137,9 @@ static void G(block_t dest, const block_t X, const block_t Y)
 	};
 
 #ifdef DEBUG
+	assert(dest != NULL);
+	assert(X != NULL);
+	assert(Y != NULL);
 	assert(sizeof(block_t) == sizeof(argon_register_t[64]));
 #endif
 
@@ -234,7 +237,7 @@ static void compute_a2i_values(struct argon2_pass_context *ctx)
 static uint32_t next_a2i_value(struct argon2_pass_context *ctx)
 {
 #ifdef DEBUG
-	assert((ctx->inst->cursor + sizeof(uint32_t)) < CEIL(ctx->ctx->q, 128 * SL) * 1024);
+	assert(ctx->inst->cursor + sizeof(uint32_t) <= CEIL(ctx->ctx->q, 128 * SL) * 1024);
 #endif
 
 	uint8_t *val = &ctx->inst->values[ctx->inst->cursor / 1024][ctx->inst->cursor % 1024];
@@ -401,11 +404,12 @@ static A2THREAD_FUNCTION_PREMISE passes(a2thread_args_t thargs) /* TODO: general
 			pass_ctx.s = 0;
 
 			a2thread_wait_or_broadcast(args->threads, args->thread_num); /* EVIL!!!! */
-			compute_a2i_values(&pass_ctx);
 
 			for(l = l_start; l < l_end; l++)
 			{
 				pass_ctx.inst = &instances[l - l_start];
+				if(ctx->y == 1)
+					compute_a2i_values(&pass_ctx);
 
 				reference = get_reference_block(&pass_ctx, 0);
 				G(temp, ctx->blocks[l][ctx->q - 1], *reference);
