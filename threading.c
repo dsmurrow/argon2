@@ -63,7 +63,7 @@ typedef (CONDITION_VARIABLE)		a2thread_cond_t;*/
 #define A2THREAD_COND_INIT(v)		InitializeConditionVariable(&v)
 #define A2THREAD_COND_DESTROY(v)	
 #define A2THREAD_COND_WAIT(cond, mutex)	!SleepConditionVariableCS(&cond, &mutex, INFINITE)
-#define A2THREAD_COND_WAKE(cond)	WakeConditionVariable(&cond)
+#define A2THREAD_COND_WAKE(cond)	WakeAllConditionVariable(&cond)
 #endif
 
 struct a2thread_context
