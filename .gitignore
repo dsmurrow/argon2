@@ -2,3 +2,8 @@
 a.out
 *.exe
 main.c
+Makefile
+*.lib
+*.a
+*.dll
+*.so
