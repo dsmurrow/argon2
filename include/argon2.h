@@ -17,8 +17,18 @@
 
 #include <inttypes.h>
 
-uint8_t *argon2d(uint8_t*, uint32_t, const uint8_t*, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
-uint8_t *argon2i(uint8_t*, uint32_t, const uint8_t*, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+struct argon2_params
+{
+	uint8_t *password, *salt;
+	uint32_t pass_len, salt_len;
+	uint32_t parallelism;
+	uint32_t tag_length;
+	uint32_t memory;
+	uint32_t iterations;
+};
+
+uint8_t *argon2d(const struct argon2_params*);
+uint8_t *argon2i(const struct argon2_params*);
 
 #endif
 

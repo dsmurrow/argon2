@@ -738,19 +738,12 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 	return buffer;
 }
 
-uint8_t *argon2d(uint8_t *password, uint32_t pass_len,
-		const uint8_t *salt, uint32_t salt_len,
-		uint32_t parallelism, uint32_t tag_length,
-		uint32_t mem_size, uint32_t iterations)
-{
-	return ARGON2(password, pass_len, salt, salt_len, parallelism, tag_length, mem_size, iterations, 0x13, 0);
+uint8_t *argon2d(const struct argon2_params *args)
+{	return ARGON2(args->password, args->pass_len, args->salt, args->salt_len, args->parallelism, args->tag_length, args->memory, args->iterations, 0x13, 0);
 }
 
-uint8_t *argon2i(uint8_t *password, uint32_t pass_len,
-		const uint8_t *salt, uint32_t salt_len,
-		uint32_t parallelism, uint32_t tag_length,
-		uint32_t mem_size, uint32_t iterations)
+uint8_t *argon2i(const struct argon2_params *args)
 {
-	return ARGON2(password, pass_len, salt, salt_len, parallelism, tag_length, mem_size, iterations, 0x13, 1);
+	return ARGON2(args->password, args->pass_len, args->salt, args->salt_len, args->parallelism, args->tag_length, args->memory, args->iterations, 0x13, 1);
 }
 
