@@ -574,6 +574,8 @@ static uint8_t *H_prime(block_t dest, const uint8_t *message, uint32_t ml, uint3
  * */
 static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		const uint8_t *S, uint32_t sl,
+		const uint8_t *K, uint32_t kl,
+		const uint8_t *X, uint32_t xl,
 		uint32_t p, uint32_t T, uint32_t m, uint32_t t,
 		uint32_t v, uint32_t y)
 {
@@ -590,12 +592,16 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 	struct a2thread_context *thread_context;
 	struct threading_args *thargs;
 
-	/* Calculate how long the first buffer will be. We have 8
+	/* Calculate how long the first buffer will be. We have 10
 	 * inputs of fixed (and same) length */
-	uint64_t buffer_length = (sizeof(uint32_t) * UINT64_C(8));
+	uint64_t buffer_length = (sizeof(uint32_t) * UINT64_C(10));
 	buffer_length += pl; /* Now we add the inputs of variable length */
 	buffer_length += sl;
+	buffer_length += kl;
+	buffer_length += xl;
 
+	kl = K == NULL ? 0 : kl;
+	xl = X == NULL ? 0 : xl;
 	if((pl > 0 && P == NULL) || (sl > 0 && S == NULL) || sl < 8
 	   || p < 1 || p > 0xFFFFFF || T < 4 || m < 8 * p || t < 1 || v != 0x13 || y > 2)
 		return NULL;
@@ -625,6 +631,14 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 	concat_int(buffer, &i, sl);
 	for(j = 0; j < sl; i++, j++)
 		buffer[i] = S[j];
+
+	concat_int(buffer, &i, kl);
+	for(j = 0; j < kl; i++, j++)
+		buffer[i] = K[j];
+
+	concat_int(buffer, &i, xl);
+	for(j = 0; j < xl; i++, j++)
+		buffer[i] = X[j];
 
 #ifdef DEBUG
 	assert(i == buffer_length);
@@ -739,11 +753,12 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 }
 
 uint8_t *argon2d(const struct argon2_params *args)
-{	return ARGON2(args->password, args->pass_len, args->salt, args->salt_len, args->parallelism, args->tag_length, args->memory, args->iterations, 0x13, 0);
+{
+	return ARGON2(args->password, args->pass_len, args->salt, args->salt_len, args->key, args->key_len, args->extra, args->extra_len, args->parallelism, args->tag_length, args->memory, args->iterations, 0x13, 0);
 }
 
 uint8_t *argon2i(const struct argon2_params *args)
 {
-	return ARGON2(args->password, args->pass_len, args->salt, args->salt_len, args->parallelism, args->tag_length, args->memory, args->iterations, 0x13, 1);
+	return ARGON2(args->password, args->pass_len, args->salt, args->salt_len, args->key, args->key_len, args->extra, args->extra_len, args->parallelism, args->tag_length, args->memory, args->iterations, 0x13, 1);
 }
 

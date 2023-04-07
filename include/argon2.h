@@ -19,8 +19,8 @@
 
 struct argon2_params
 {
-	uint8_t *password, *salt;
-	uint32_t pass_len, salt_len;
+	uint8_t *password, *salt, *key, *extra;
+	uint32_t pass_len, salt_len, key_len, extra_len;
 	uint32_t parallelism;
 	uint32_t tag_length;
 	uint32_t memory;
