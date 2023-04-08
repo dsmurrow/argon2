@@ -46,6 +46,18 @@ static void print_bytes(const uint8_t *bytes, size_t len, const char *prefix, co
 typedef uint8_t block_t[1024];
 typedef uint64_t argon_register_t[2];
 
+static void print_block(const block_t block, int b_n)
+{
+	for(int i = 0; i < 1024 / 8; i++)
+	{
+		uint64_t n = *(uint64_t*) &block[i * 8];
+
+		printf("Block %04d [%3d]: %016" PRIx64 "\n", b_n, i, n);
+	}
+
+	printf("\n\n");
+}
+
 struct argon2_context
 {
 	block_t **blocks;
@@ -510,7 +522,7 @@ static uint8_t *H_prime(block_t dest, const uint8_t *message, uint32_t ml, uint3
 	}
 	else
 	{
-		uint32_t rounds = CEIL(output_len, 32) - 1;
+		uint32_t rounds = CEIL(output_len, 32) - 2;
 		uint32_t partial_bytes_needed = output_len - (32 * rounds);
 
 		size_t total_needed = (64 * rounds) + partial_bytes_needed;
@@ -529,8 +541,9 @@ static uint8_t *H_prime(block_t dest, const uint8_t *message, uint32_t ml, uint3
 		blake2b(message_prime, message_prime, prime_len, 64);
 		i = 64;
 
-		for(j = 1; j < rounds; i += 64, j++)
+		for(j = 2; j <= rounds; i += 64, j++)
 			blake2b(&message_prime[i], &message_prime[i - 64], 64, 64);
+
 
 		blake2b(&message_prime[i], &message_prime[i - 64], 64, partial_bytes_needed);
 		i += partial_bytes_needed;
@@ -696,8 +709,6 @@ static uint8_t *ARGON2(uint8_t *P, uint32_t pl,
 		concat_int(H_0, &pass_start, (uint32_t) i);
 		H_prime(ctx.blocks[i][1], H_0, H0_len, 1024);
 	}
-
-
 
 	free(H_0);
 
