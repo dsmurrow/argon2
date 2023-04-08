@@ -46,6 +46,7 @@ static void print_bytes(const uint8_t *bytes, size_t len, const char *prefix, co
 typedef uint8_t block_t[1024];
 typedef uint64_t argon_register_t[2];
 
+#ifdef DEBUG
 static void print_block(const block_t block, int b_n)
 {
 	for(int i = 0; i < 1024 / 8; i++)
@@ -57,6 +58,7 @@ static void print_block(const block_t block, int b_n)
 
 	printf("\n\n");
 }
+#endif
 
 struct argon2_context
 {
